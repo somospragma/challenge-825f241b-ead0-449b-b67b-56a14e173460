@@ -1,0 +1,119 @@
+spring:
+  application:
+    name: payments-service
+  profiles:
+    active: dev
+  webflux:
+    base-path: /api/payments
+  datasource:
+    url: jdbc:postgresql://localhost:5432/payments_db
+    username: payments_user
+    password: payments_pass
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20
+      connection-timeout: 30000
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  redis:
+    host: localhost
+    port: 6379
+    timeout: 5000ms
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://auth.pragma.com/realms/payments-realm
+          jwk-set-uri: https://auth.pragma.com/realms/payments-realm/protocol/openid-connect/certs
+
+server:
+  port: 8080
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,redis
+        liveness:
+          include: livenessState
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      riskBureau:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 5s
+        failureRateThreshold: 50
+        eventConsumerBufferSize: 10
+        slowCallDurationThreshold: 2s
+        slowCallRateThreshold: 100
+      coreBanking:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        permittedNumberOfCallsInHalfOpenState: 3
+        waitDurationInOpenState: 5s
+        failureRateThreshold: 50
+      fraudEngine:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        permittedNumberOfCallsInHalfOpenState: 3
+        waitDurationInOpenState: 5s
+        failureRateThreshold: 50
+  retry:
+    instances:
+      riskBureau:
+        maxAttempts: 3
+        waitDuration: 500ms
+        retryExceptions:
+          - com.pragma.payments.domain.exception.TimeoutException
+      coreBanking:
+        maxAttempts: 3
+        waitDuration: 500ms
+        retryExceptions:
+          - org.springframework.web.client.HttpServerErrorException
+      fraudEngine:
+        maxAttempts: 3
+        waitDuration: 500ms
+        retryExceptions:
+          - com.pragma.payments.domain.exception.TimeoutException
+  ratelimiter:
+    instances:
+      paymentProcessing:
+        limitForPeriod: 1500
+        limitRefreshPeriod: 1s
+        timeoutDuration: 0
+
+services:
+  external:
+    riskBureau:
+      url: https://risk-bureau.pragma.com/api/v1/assessment
+      timeout: 2000
+    coreBanking:
+      url: https://core-banking.pragma.com/api/v1/transactions
+      timeout: 3000
+    fraudEngine:
+      url: https://fraud-engine.pragma.com/api/v1/score
+      timeout: 1500
+    audit:
+      snsTopicArn: arn:aws:sns:us-east-1:123456789012:payments-audit-events
